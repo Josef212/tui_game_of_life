@@ -1,11 +1,10 @@
-use anyhow::anyhow;
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
 use ratatui::{prelude::*, widgets::*};
-use std::io::{self, stdout};
+use std::io::stdout;
 
 #[derive(Clone, Debug)]
 pub enum CellState {
@@ -164,27 +163,16 @@ fn logic_update(app: &mut App) -> anyhow::Result<()> {
 }
 
 fn ui<B: Backend>(app: &App, frame: &mut Frame<B>) {
-    // frame.render_widget(
-    //     Paragraph::new("Hello world!")
-    //         .block(Block::default().title("Greeting").borders(Borders::ALL)),
-    //     frame.size(),
-    // );
-
     let mut cells = Vec::with_capacity((app.grid_width * app.grid_height) as usize);
     for y in 0..app.grid_height {
         let mut row = Vec::new();
 
         for x in 0..app.grid_width {
             let index = y * app.grid_width + x;
-            let color = match &app.cells[index as usize] {
-                CellState::Alive => Color::White,
-                CellState::Dead => Color::Black,
-            };
-            let cell = Cell::from("██").fg(color);
-
             let cell = match &app.cells[index as usize] {
-                CellState::Alive => Cell::from("██").fg(Color::White),
-                CellState::Dead => Cell::from(" "),
+                // CellState::Alive => Cell::from("██").bg(Color::Black).fg(Color::White),
+                CellState::Alive => Cell::from("  ").bg(Color::White).fg(Color::Black),
+                CellState::Dead => Cell::from(" ").bg(Color::Reset).fg(Color::White),
             };
 
             row.push(cell);
