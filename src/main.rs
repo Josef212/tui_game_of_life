@@ -17,6 +17,8 @@ pub struct App {
     cells: Vec<CellState>,
     grid_width: u32,
     grid_height: u32,
+    cycle_count: u64,
+    skip_ratio: u16,
 }
 
 impl App {
@@ -30,6 +32,8 @@ impl App {
             cells: grid,
             grid_width: width,
             grid_height: height,
+            cycle_count: 0,
+            skip_ratio: 1,
         }
     }
 
@@ -100,16 +104,19 @@ fn main() -> anyhow::Result<()> {
     let mut should_quit = false;
 
     let size = terminal.size()?;
-    let grid_width = ((size.width - 2) / 2) as u32;
-    let grid_height = (size.height - 2) as u32;
+    let app_layout = AppLayout::generate(size);
+
+    let grid_width = ((app_layout.grid_panel.width - 2) / 2) as u32;
+    let grid_height = (app_layout.grid_panel.height - 2) as u32;
 
     let mut app = App::new(grid_width, grid_height);
     app.randomize_cells();
 
     while !should_quit {
-        should_quit = handle_events()?;
+        app.cycle_count += 1;
+        should_quit = handle_events(&mut app)?;
         logic_update(&mut app)?;
-        terminal.draw(|frame| ui(&app, frame))?;
+        terminal.draw(|frame| ui(&app, &app_layout, frame))?;
     }
 
     disable_raw_mode()?;
@@ -118,11 +125,28 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_events() -> anyhow::Result<bool> {
+fn handle_events(app: &mut App) -> anyhow::Result<bool> {
     if event::poll(std::time::Duration::from_millis(50))? {
         if let Event::Key(key) = event::read()? {
-            if key.kind == event::KeyEventKind::Press && key.code == KeyCode::Char('q') {
-                return Ok(true);
+            if key.kind == event::KeyEventKind::Press {
+                return Ok(match key.code {
+                    KeyCode::Char('q') => true,
+                    KeyCode::Char('r') => {
+                        app.randomize_cells();
+                        false
+                    }
+                    KeyCode::Char('j') => {
+                        if app.skip_ratio > 1 {
+                            app.skip_ratio -= 1;
+                        }
+                        false
+                    },
+                    KeyCode::Char('k') => {
+                        app.skip_ratio += 1;
+                        false
+                    },
+                    _ => false,
+                });
             }
         }
     }
@@ -131,6 +155,11 @@ fn handle_events() -> anyhow::Result<bool> {
 }
 
 fn logic_update(app: &mut App) -> anyhow::Result<()> {
+    if app.cycle_count % app.skip_ratio as u64 != 0 {
+        return Ok(());
+
+    }
+
     // TODO: Worst way to do this. Add a second vector to the App and have a double buffer swap
     let copy = app.clone();
 
@@ -162,7 +191,7 @@ fn logic_update(app: &mut App) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn ui<B: Backend>(app: &App, frame: &mut Frame<B>) {
+fn ui<B: Backend>(app: &App, app_layout: &AppLayout, frame: &mut Frame<B>) {
     let mut cells = Vec::with_capacity((app.grid_width * app.grid_height) as usize);
     for y in 0..app.grid_height {
         let mut row = Vec::new();
@@ -172,7 +201,8 @@ fn ui<B: Backend>(app: &App, frame: &mut Frame<B>) {
             let cell = match &app.cells[index as usize] {
                 // CellState::Alive => Cell::from("██").bg(Color::Black).fg(Color::White),
                 CellState::Alive => Cell::from("  ").bg(Color::White).fg(Color::Black),
-                CellState::Dead => Cell::from(" ").bg(Color::Reset).fg(Color::White),
+                CellState::Dead => Cell::from(" ").bg(Color::Black).fg(Color::White),
+                // CellState::Dead => Cell::from(" ").bg(Color::Reset).fg(Color::White),
             };
 
             row.push(cell);
@@ -187,10 +217,86 @@ fn ui<B: Backend>(app: &App, frame: &mut Frame<B>) {
         constrains.push(Constraint::Length(2));
     }
 
+    let block = Block::new()
+        .title("Game of life")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded);
+
+    frame.render_widget(block, app_layout.main_layout);
+
     let table = Table::new(cells)
-        .block(Block::default().borders(Borders::ALL).title("Table"))
+        .block(Block::default().borders(Borders::ALL))
         .widths(&constrains)
         .column_spacing(0);
 
-    frame.render_widget(table, frame.size());
+    frame.render_widget(table, app_layout.grid_panel);
+
+    let block = Block::new()
+        .title("Config")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded);
+
+    frame.render_widget(block, app_layout.config_panel);
+
+    let block = Block::new()
+        .title("Console")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded);
+
+    frame.render_widget(block, app_layout.console_panel);
+
+    let block = Block::new()
+        .title("Cheatsheat")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded);
+
+    let shortcuts = Text::from("Q: quit  R: reset");
+    let shortcuts = Paragraph::new(shortcuts).block(block);
+    frame.render_widget(shortcuts, app_layout.bottom_panel);
+}
+
+pub struct AppLayout {
+    main_layout: Rect,
+    grid_panel: Rect,
+    config_panel: Rect,
+    console_panel: Rect,
+    bottom_panel: Rect,
+}
+
+impl AppLayout {
+    pub fn generate(terminal_rect: Rect) -> Self {
+        let main_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(10),
+                Constraint::Length(3),
+            ])
+            .split(terminal_rect.inner(&Margin::new(1, 1)));
+
+        let bottom_panel = main_layout[1];
+
+        let main_layout = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(80),
+                Constraint::Percentage(20),
+            ])
+            .split(main_layout[0]);
+
+        let right_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(80),
+                Constraint::Percentage(20),
+            ])
+            .split(main_layout[1]);
+
+        Self {
+            main_layout: terminal_rect,
+            grid_panel: main_layout[0],
+            config_panel: right_layout[0],
+            console_panel: right_layout[1],
+            bottom_panel,
+        }
+    }
 }
