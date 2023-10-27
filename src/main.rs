@@ -84,53 +84,56 @@ impl AppLayout {
     }
 }
 
-#[derive(Clone)]
-pub struct App {
-    cells: Vec<CellState>,
-    grid_width: u32,
-    grid_height: u32,
-    cycle_count: u64,
-    skip_ratio: u16,
+#[derive(Clone)] // TODO: Remove
+pub struct DoubleBufferGrid {
+    grids: [Vec<CellState>; 2],
+    cycle: usize,
+    width: usize,
+    height: usize,
 }
 
-impl App {
-    pub fn new(width: u32, height: u32) -> Self {
+impl DoubleBufferGrid {
+    pub fn new(width: usize, height: usize) -> Self {
         let size = width * height;
-        let grid = std::iter::repeat(CellState::Dead)
-            .take(size as usize)
-            .collect::<Vec<CellState>>();
+        let grids = [
+            std::iter::repeat(CellState::Dead).take(size).collect(),
+            std::iter::repeat(CellState::Dead).take(size).collect(),
+        ];
 
-        App {
-            cells: grid,
-            grid_width: width,
-            grid_height: height,
-            cycle_count: 0,
-            skip_ratio: 1,
+        Self {
+            grids,
+            cycle: 0,
+            width,
+            height,
         }
     }
 
-    pub fn print_cells(&self) {
-        for y in 0..self.grid_height {
-            let mut line = String::new();
-            for x in 0..self.grid_width {
-                let index = y * self.grid_width + x;
-                let cell = &self.cells[index as usize];
-                line += &format!("{:?} ", cell);
-            }
-
-            println!("{}", line);
+    pub fn randomize(&mut self) {
+        let size = self.width * self.height;
+        for i in 0..size {
+            let state = if rand::random() {CellState::Alive} else {CellState::Dead};
+            self.grids[0][i] = state.clone();
+            self.grids[1][i] = state.clone();
         }
     }
 
-    pub fn randomize_cells(&mut self) -> &mut Self {
-        self.cells.iter_mut().for_each(|c| {
-            *c = if rand::random() {
-                CellState::Alive
-            } else {
-                CellState::Dead
-            }
-        });
-        self
+    pub fn add_cycle(&mut self) {
+        self.cycle += 1;
+    }
+
+    pub fn get_read_grid(&self) -> &Vec<CellState> {
+        let read_grid_index = self.cycle % 2;
+        &self.grids[read_grid_index]
+    }
+
+    pub fn get_write_grid(&mut self) -> &mut Vec<CellState> {
+        let write_grid_index = (self.cycle + 1) % 2;
+        &mut self.grids[write_grid_index]
+    }
+
+    pub fn get_render_grid(&self) -> &Vec<CellState> {
+        let write_grid_index = (self.cycle + 1) % 2;
+        &self.grids[write_grid_index]
     }
 
     pub fn get_alive_neighbours_at_point(&self, x: u32, y: u32) -> usize {
@@ -145,26 +148,60 @@ impl App {
                 let new_y = y as i32 + yy;
 
                 if new_x < 0
-                    || new_x >= self.grid_width as i32
+                    || new_x >= self.width as i32
                     || new_y < 0
-                    || new_y >= self.grid_height as i32
+                    || new_y >= self.height as i32
                 {
                     continue;
                 }
 
-                let index = (new_y as u32) * self.grid_width + (new_x as u32);
-                indices.push(index as usize);
+                let index = (new_y as usize) * self.width + (new_x as usize);
+                indices.push(index);
             }
         }
 
+        let read_grid = &self.get_read_grid();
         indices
             .iter()
-            .map(|i| &self.cells[*i])
+            .map(|i| &read_grid[*i])
             .filter(|cs| match *cs {
                 CellState::Alive => true,
                 CellState::Dead => false,
             })
             .count()
+    }
+}
+
+#[derive(Clone)]
+pub struct App {
+    grids: DoubleBufferGrid,
+    grid_width: u32,
+    grid_height: u32,
+    cycle_count: u64,
+    skip_ratio: u16,
+}
+
+impl App {
+    pub fn new(width: u32, height: u32) -> Self {
+        let size = width * height;
+        let grids = DoubleBufferGrid::new(width as usize, height as usize);
+
+        App {
+            grids,
+            grid_width: width,
+            grid_height: height,
+            cycle_count: 0,
+            skip_ratio: 1,
+        }
+    }
+
+    pub fn randomize_cells(&mut self) -> &mut Self {
+        self.grids.randomize();
+        self
+    }
+
+    pub fn get_alive_neighbours_at_point(&self, x: u32, y: u32) -> usize {
+        self.grids.get_alive_neighbours_at_point(x, y)
     }
 }
 
@@ -241,25 +278,26 @@ fn logic_update(app: &mut App, player_state: &PlayerState) -> anyhow::Result<()>
         return Ok(());
     }
 
-    // TODO: Worst way to do this. Add a second vector to the App and have a double buffer swap
-    let copy = app.clone();
+    app.grids.add_cycle();
 
     for y in 0..app.grid_height {
         for x in 0..app.grid_width {
-            let index = (y * app.grid_width + x) as usize;
-            let alive_neighbours = copy.get_alive_neighbours_at_point(x, y);
-            let cell = &copy.cells[index];
 
+            let index = (y * app.grid_width + x) as usize;
+            let alive_neighbours = app.grids.get_alive_neighbours_at_point(x, y);
+            let cell = &app.grids.get_read_grid()[index].clone();
+
+            let write = app.grids.get_write_grid();
             match cell {
                 CellState::Dead => {
-                    app.cells[index] = if alive_neighbours == 3 {
+                    write[index] = if alive_neighbours == 3 {
                         CellState::Alive
                     } else {
                         CellState::Dead
                     };
                 }
                 CellState::Alive => {
-                    app.cells[index] = if alive_neighbours == 2 || alive_neighbours == 3 {
+                    write[index] = if alive_neighbours == 2 || alive_neighbours == 3 {
                         CellState::Alive
                     } else {
                         CellState::Dead
@@ -279,12 +317,13 @@ fn ui<B: Backend>(
     frame: &mut Frame<B>,
 ) {
     let mut cells = Vec::with_capacity((app.grid_width * app.grid_height) as usize);
+    let read = app.grids.get_render_grid();
     for y in 0..app.grid_height {
         let mut row = Vec::new();
 
         for x in 0..app.grid_width {
             let index = y * app.grid_width + x;
-            let cell = match &app.cells[index as usize] {
+            let cell = match &read[index as usize] {
                 // CellState::Alive => Cell::from("██").bg(Color::Black).fg(Color::White),
                 CellState::Alive => Cell::from("  ").bg(Color::White).fg(Color::Black),
                 CellState::Dead => Cell::from(" ").bg(Color::Black).fg(Color::White),
