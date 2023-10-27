@@ -12,6 +12,78 @@ pub enum CellState {
     Dead,
 }
 
+#[derive(Debug)]
+pub enum PlayerState {
+    Play,
+    Pause,
+}
+
+impl PlayerState {
+    pub fn switch(&mut self) {
+        *self = match self {
+            PlayerState::Pause => PlayerState::Play,
+            PlayerState::Play => PlayerState::Pause,
+        }
+    }
+}
+
+pub struct AppLayout {
+    main_layout: Rect,
+    grid_panel: Rect,
+    config_panel: Rect,
+    console_panel: Rect,
+    bottom_panel: Rect,
+    grid_cell_width: u32,
+    grid_cell_height: u32,
+    grid_constraints: Vec<Constraint>,
+}
+
+impl AppLayout {
+    pub fn generate(terminal_rect: Rect) -> Self {
+        let main_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(10), Constraint::Length(3)])
+            .split(terminal_rect.inner(&Margin::new(1, 1)));
+
+        let bottom_panel = main_layout[1];
+
+        let main_layout = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(80), Constraint::Percentage(20)])
+            .split(main_layout[0]);
+
+        let right_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(80), Constraint::Percentage(20)])
+            .split(main_layout[1]);
+
+        let grid_width = Self::get_grid_width(&main_layout[0]);
+        let grid_height = Self::get_grid_height(&main_layout[0]);
+        let constrains = std::iter::repeat(Constraint::Length(2))
+            .take(grid_width as usize)
+            .collect::<Vec<Constraint>>();
+
+        Self {
+            main_layout: terminal_rect,
+            grid_panel: main_layout[0],
+            config_panel: right_layout[0],
+            console_panel: right_layout[1],
+            bottom_panel,
+            grid_cell_width: grid_width,
+            grid_cell_height: grid_height,
+            grid_constraints: constrains,
+        }
+    }
+
+    pub fn get_grid_width(grid_panel: &Rect) -> u32 {
+        ((grid_panel.width - 2) / 2) as u32
+    }
+
+    pub fn get_grid_height(grid_panel: &Rect) -> u32 {
+        (grid_panel.height - 2) as u32
+    }
+}
+
 #[derive(Clone)]
 pub struct App {
     cells: Vec<CellState>,
@@ -106,17 +178,15 @@ fn main() -> anyhow::Result<()> {
     let size = terminal.size()?;
     let app_layout = AppLayout::generate(size);
 
-    let grid_width = ((app_layout.grid_panel.width - 2) / 2) as u32;
-    let grid_height = (app_layout.grid_panel.height - 2) as u32;
-
-    let mut app = App::new(grid_width, grid_height);
+    let mut app = App::new(app_layout.grid_cell_width, app_layout.grid_cell_height);
     app.randomize_cells();
 
+    let mut player_state = PlayerState::Pause;
+
     while !should_quit {
-        app.cycle_count += 1;
-        should_quit = handle_events(&mut app)?;
-        logic_update(&mut app)?;
-        terminal.draw(|frame| ui(&app, &app_layout, frame))?;
+        should_quit = handle_events(&mut app, &mut player_state)?;
+        logic_update(&mut app, &player_state)?;
+        terminal.draw(|frame| ui(&app, &app_layout, &player_state, frame))?;
     }
 
     disable_raw_mode()?;
@@ -125,7 +195,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_events(app: &mut App) -> anyhow::Result<bool> {
+fn handle_events(app: &mut App, player_state: &mut PlayerState) -> anyhow::Result<bool> {
     if event::poll(std::time::Duration::from_millis(50))? {
         if let Event::Key(key) = event::read()? {
             if key.kind == event::KeyEventKind::Press {
@@ -133,18 +203,23 @@ fn handle_events(app: &mut App) -> anyhow::Result<bool> {
                     KeyCode::Char('q') => true,
                     KeyCode::Char('r') => {
                         app.randomize_cells();
+                        app.cycle_count = 0;
                         false
                     }
-                    KeyCode::Char('j') => {
+                    KeyCode::Char('k') => {
                         if app.skip_ratio > 1 {
                             app.skip_ratio -= 1;
                         }
                         false
-                    },
-                    KeyCode::Char('k') => {
+                    }
+                    KeyCode::Char('j') => {
                         app.skip_ratio += 1;
                         false
-                    },
+                    }
+                    KeyCode::Char('p') => {
+                        player_state.switch();
+                        false
+                    }
                     _ => false,
                 });
             }
@@ -154,10 +229,16 @@ fn handle_events(app: &mut App) -> anyhow::Result<bool> {
     Ok(false)
 }
 
-fn logic_update(app: &mut App) -> anyhow::Result<()> {
+fn logic_update(app: &mut App, player_state: &PlayerState) -> anyhow::Result<()> {
+    match player_state {
+        PlayerState::Play => {}
+        PlayerState::Pause => return Ok(()),
+    };
+
+    app.cycle_count += 1;
+
     if app.cycle_count % app.skip_ratio as u64 != 0 {
         return Ok(());
-
     }
 
     // TODO: Worst way to do this. Add a second vector to the App and have a double buffer swap
@@ -191,7 +272,12 @@ fn logic_update(app: &mut App) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn ui<B: Backend>(app: &App, app_layout: &AppLayout, frame: &mut Frame<B>) {
+fn ui<B: Backend>(
+    app: &App,
+    app_layout: &AppLayout,
+    player_state: &PlayerState,
+    frame: &mut Frame<B>,
+) {
     let mut cells = Vec::with_capacity((app.grid_width * app.grid_height) as usize);
     for y in 0..app.grid_height {
         let mut row = Vec::new();
@@ -212,11 +298,6 @@ fn ui<B: Backend>(app: &App, app_layout: &AppLayout, frame: &mut Frame<B>) {
         cells.push(row);
     }
 
-    let mut constrains = Vec::new();
-    for _ in 0..app.grid_width {
-        constrains.push(Constraint::Length(2));
-    }
-
     let block = Block::new()
         .title("Game of life")
         .borders(Borders::ALL)
@@ -226,17 +307,30 @@ fn ui<B: Backend>(app: &App, app_layout: &AppLayout, frame: &mut Frame<B>) {
 
     let table = Table::new(cells)
         .block(Block::default().borders(Borders::ALL))
-        .widths(&constrains)
+        .widths(&app_layout.grid_constraints)
         .column_spacing(0);
 
     frame.render_widget(table, app_layout.grid_panel);
 
     let block = Block::new()
         .title("Config")
+        .padding(Padding::new(1, 0, 1, 0))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded);
 
-    frame.render_widget(block, app_layout.config_panel);
+    let text = Text::from(vec![
+        Line::from(vec![
+            Span::raw("Cycle count: "),
+            Span::raw(app.cycle_count.to_string()),
+        ]),
+        Line::from(vec![
+            Span::raw("Player state: "),
+            Span::raw(format!("{:?}", player_state)),
+        ]),
+    ]);
+    let text = Paragraph::new(text).block(block);
+
+    frame.render_widget(text, app_layout.config_panel);
 
     let block = Block::new()
         .title("Console")
@@ -250,53 +344,7 @@ fn ui<B: Backend>(app: &App, app_layout: &AppLayout, frame: &mut Frame<B>) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded);
 
-    let shortcuts = Text::from("Q: quit  R: reset");
+    let shortcuts = Text::from("Q: quit  R: reset  P: play/pause");
     let shortcuts = Paragraph::new(shortcuts).block(block);
     frame.render_widget(shortcuts, app_layout.bottom_panel);
-}
-
-pub struct AppLayout {
-    main_layout: Rect,
-    grid_panel: Rect,
-    config_panel: Rect,
-    console_panel: Rect,
-    bottom_panel: Rect,
-}
-
-impl AppLayout {
-    pub fn generate(terminal_rect: Rect) -> Self {
-        let main_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(10),
-                Constraint::Length(3),
-            ])
-            .split(terminal_rect.inner(&Margin::new(1, 1)));
-
-        let bottom_panel = main_layout[1];
-
-        let main_layout = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(80),
-                Constraint::Percentage(20),
-            ])
-            .split(main_layout[0]);
-
-        let right_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(80),
-                Constraint::Percentage(20),
-            ])
-            .split(main_layout[1]);
-
-        Self {
-            main_layout: terminal_rect,
-            grid_panel: main_layout[0],
-            config_panel: right_layout[0],
-            console_panel: right_layout[1],
-            bottom_panel,
-        }
-    }
 }
