@@ -6,9 +6,11 @@ use crossterm::{
 use ratatui::{prelude::*, widgets::*};
 use std::io::stdout;
 
+const MAX_LIFE_CYCLES: usize = 10;
+
 #[derive(Clone, Debug)]
 pub enum CellState {
-    Alive,
+    Alive(usize),
     Dead,
 }
 
@@ -110,7 +112,7 @@ impl DoubleBufferGrid {
     pub fn randomize(&mut self) {
         let size = self.width * self.height;
         for i in 0..size {
-            let state = if rand::random() {CellState::Alive} else {CellState::Dead};
+            let state = if rand::random() {CellState::Alive(0)} else {CellState::Dead};
             self.grids[0][i] = state.clone();
             self.grids[1][i] = state.clone();
         }
@@ -163,7 +165,7 @@ impl DoubleBufferGrid {
             .iter()
             .map(|i| &self.get_read_grid()[*i])
             .filter(|cs| match *cs {
-                CellState::Alive => true,
+                CellState::Alive(_) => true,
                 CellState::Dead => false,
             })
             .count()
@@ -284,14 +286,14 @@ fn logic_update(app: &mut App, player_state: &PlayerState) -> anyhow::Result<()>
             match cell {
                 CellState::Dead => {
                     write[index] = if alive_neighbours == 3 {
-                        CellState::Alive
+                        CellState::Alive(0)
                     } else {
                         CellState::Dead
                     };
                 }
-                CellState::Alive => {
+                CellState::Alive(c) => {
                     write[index] = if alive_neighbours == 2 || alive_neighbours == 3 {
-                        CellState::Alive
+                        CellState::Alive(c + 1)
                     } else {
                         CellState::Dead
                     };
@@ -317,8 +319,17 @@ fn ui<B: Backend>(
         for x in 0..app.grid_width {
             let index = y * app.grid_width + x;
             let cell = match &read[index as usize] {
-                // CellState::Alive => Cell::from("██").bg(Color::Black).fg(Color::White),
-                CellState::Alive => Cell::from("  ").bg(Color::White).fg(Color::Black),
+                // CellState::Alive(_) => Cell::from("██").bg(Color::Black).fg(Color::White),
+                CellState::Alive(c) => {
+                    let c = std::cmp::min(*c, MAX_LIFE_CYCLES);
+                    let dc = c as f64 / MAX_LIFE_CYCLES as f64;
+                    let dc = 1.0 - dc;
+                    let col = (dc * 255.0) as u8;
+                    let col = Color::Rgb(255-col, col, col);
+
+                    // Cell::from("  ").bg(Color::White).fg(Color::Black)
+                    Cell::from("  ").bg(col).fg(Color::Black)
+                },
                 // CellState::Dead => Cell::from(" ").bg(Color::Black).fg(Color::White),
                 CellState::Dead => Cell::from(" ").bg(Color::Reset).fg(Color::White),
             };
