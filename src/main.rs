@@ -25,7 +25,22 @@ impl PlayerState {
         *self = match self {
             PlayerState::Pause => PlayerState::Play,
             PlayerState::Play => PlayerState::Pause,
-        }
+        };
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BorderPolicy {
+    Clamp,
+    Wrap,
+}
+
+impl BorderPolicy {
+    pub fn switch(&mut self) {
+        *self = match self {
+            Self::Clamp => Self::Wrap,
+            Self::Wrap => Self::Clamp,
+        };
     }
 }
 
@@ -112,7 +127,11 @@ impl DoubleBufferGrid {
     pub fn randomize(&mut self) {
         let size = self.width * self.height;
         for i in 0..size {
-            let state = if rand::random() {CellState::Alive(0)} else {CellState::Dead};
+            let state = if rand::random() {
+                CellState::Alive(0)
+            } else {
+                CellState::Dead
+            };
             self.grids[0][i] = state.clone();
             self.grids[1][i] = state.clone();
         }
@@ -137,7 +156,7 @@ impl DoubleBufferGrid {
         &self.grids[write_grid_index]
     }
 
-    pub fn get_alive_neighbours_at_point(&self, x: usize, y: usize) -> usize {
+    pub fn get_alive_neighbours_at_point(&self, x: usize, y: usize, policy: BorderPolicy) -> usize {
         let mut indices = Vec::with_capacity(8);
         for yy in (-1 as i32)..2 {
             for xx in (-1 as i32)..2 {
@@ -145,15 +164,33 @@ impl DoubleBufferGrid {
                     continue;
                 }
 
-                let new_x = x as i32 + xx;
-                let new_y = y as i32 + yy;
+                let mut new_x = x as i32 + xx;
+                let mut new_y = y as i32 + yy;
 
-                if new_x < 0
-                    || new_x >= self.width as i32
-                    || new_y < 0
-                    || new_y >= self.height as i32
-                {
-                    continue;
+                if policy == BorderPolicy::Clamp {
+                    if new_x < 0
+                        || new_x >= self.width as i32
+                        || new_y < 0
+                        || new_y >= self.height as i32
+                    {
+                        continue;
+                    }
+                } else if policy == BorderPolicy::Wrap {
+                    // Would be great to use modulus but it's not working with negative numbers 🙃
+                    // new_x = new_x % (self.width as i32);
+                    // new_y = new_y % (self.height as i32);
+                    if new_x < 0 {
+                        new_x = (self.width - 1) as i32;
+                    }
+                    if new_x >= self.width as i32 {
+                        new_x = 0;
+                    }
+                    if new_y < 0 {
+                        new_y = (self.height - 1) as i32;
+                    }
+                    if new_y >= self.height as i32 {
+                        new_y = 0;
+                    }
                 }
 
                 let index = (new_y as usize) * self.width + (new_x as usize);
@@ -178,6 +215,7 @@ pub struct App {
     grid_height: usize,
     cycle_count: usize,
     skip_ratio: u16,
+    border_policy: BorderPolicy,
 }
 
 impl App {
@@ -190,6 +228,7 @@ impl App {
             grid_height: height,
             cycle_count: 0,
             skip_ratio: 1,
+            border_policy: BorderPolicy::Clamp,
         }
     }
 
@@ -199,7 +238,8 @@ impl App {
     }
 
     pub fn get_alive_neighbours_at_point(&self, x: usize, y: usize) -> usize {
-        self.grids.get_alive_neighbours_at_point(x, y)
+        self.grids
+            .get_alive_neighbours_at_point(x, y, self.border_policy.clone())
     }
 }
 
@@ -213,7 +253,6 @@ fn main() -> anyhow::Result<()> {
     let app_layout = AppLayout::generate(size);
     let mut app = App::new(app_layout.grid_cell_width, app_layout.grid_cell_height);
     app.randomize_cells();
-
 
     let mut should_quit = false;
     while !should_quit {
@@ -253,6 +292,10 @@ fn handle_events(app: &mut App, player_state: &mut PlayerState) -> anyhow::Resul
                         player_state.switch();
                         false
                     }
+                    KeyCode::Char('b') => {
+                        app.border_policy.switch();
+                        false
+                    }
                     _ => false,
                 });
             }
@@ -279,7 +322,7 @@ fn logic_update(app: &mut App, player_state: &PlayerState) -> anyhow::Result<()>
     for y in 0..app.grid_height {
         for x in 0..app.grid_width {
             let index = (y * app.grid_width + x) as usize;
-            let alive_neighbours = app.grids.get_alive_neighbours_at_point(x, y);
+            let alive_neighbours = app.get_alive_neighbours_at_point(x, y);
             let cell = &app.grids.get_read_grid()[index].clone();
 
             let write = app.grids.get_write_grid();
@@ -325,11 +368,11 @@ fn ui<B: Backend>(
                     let dc = c as f64 / MAX_LIFE_CYCLES as f64;
                     let dc = 1.0 - dc;
                     let col = (dc * 255.0) as u8;
-                    let col = Color::Rgb(255-col, col, col);
+                    let col = Color::Rgb(255 - col, col, col);
 
                     // Cell::from("  ").bg(Color::White).fg(Color::Black)
                     Cell::from("  ").bg(col).fg(Color::Black)
-                },
+                }
                 // CellState::Dead => Cell::from(" ").bg(Color::Black).fg(Color::White),
                 CellState::Dead => Cell::from(" ").bg(Color::Reset).fg(Color::White),
             };
@@ -370,6 +413,10 @@ fn ui<B: Backend>(
             Span::raw("Player state: "),
             Span::raw(format!("{:?}", player_state)),
         ]),
+        Line::from(vec![
+            Span::raw("Border policy: "),
+            Span::raw(format!("{:?}", app.border_policy)),
+        ]),
     ]);
     let text = Paragraph::new(text).block(block);
 
@@ -387,7 +434,7 @@ fn ui<B: Backend>(
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded);
 
-    let shortcuts = Text::from("Q: quit  R: reset  P: play/pause");
+    let shortcuts = Text::from("Q: quit  R: reset  P: play/pause  B: switch border policy");
     let shortcuts = Paragraph::new(shortcuts).block(block);
     frame.render_widget(shortcuts, app_layout.bottom_panel);
 }
