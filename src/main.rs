@@ -84,7 +84,6 @@ impl AppLayout {
     }
 }
 
-#[derive(Clone)] // TODO: Remove
 pub struct DoubleBufferGrid {
     grids: [Vec<CellState>; 2],
     cycle: usize,
@@ -172,7 +171,6 @@ impl DoubleBufferGrid {
     }
 }
 
-#[derive(Clone)]
 pub struct App {
     grids: DoubleBufferGrid,
     grid_width: u32,
@@ -183,7 +181,6 @@ pub struct App {
 
 impl App {
     pub fn new(width: u32, height: u32) -> Self {
-        let size = width * height;
         let grids = DoubleBufferGrid::new(width as usize, height as usize);
 
         App {
@@ -282,7 +279,6 @@ fn logic_update(app: &mut App, player_state: &PlayerState) -> anyhow::Result<()>
 
     for y in 0..app.grid_height {
         for x in 0..app.grid_width {
-
             let index = (y * app.grid_width + x) as usize;
             let alive_neighbours = app.grids.get_alive_neighbours_at_point(x, y);
             let cell = &app.grids.get_read_grid()[index].clone();
