@@ -33,8 +33,8 @@ pub struct AppLayout {
     config_panel: Rect,
     console_panel: Rect,
     bottom_panel: Rect,
-    grid_cell_width: u32,
-    grid_cell_height: u32,
+    grid_cell_width: usize,
+    grid_cell_height: usize,
     grid_constraints: Vec<Constraint>,
 }
 
@@ -75,12 +75,12 @@ impl AppLayout {
         }
     }
 
-    pub fn get_grid_width(grid_panel: &Rect) -> u32 {
-        ((grid_panel.width - 2) / 2) as u32
+    fn get_grid_width(grid_panel: &Rect) -> usize {
+        ((grid_panel.width - 2) / 2) as usize
     }
 
-    pub fn get_grid_height(grid_panel: &Rect) -> u32 {
-        (grid_panel.height - 2) as u32
+    fn get_grid_height(grid_panel: &Rect) -> usize {
+        (grid_panel.height - 2) as usize
     }
 }
 
@@ -135,7 +135,7 @@ impl DoubleBufferGrid {
         &self.grids[write_grid_index]
     }
 
-    pub fn get_alive_neighbours_at_point(&self, x: u32, y: u32) -> usize {
+    pub fn get_alive_neighbours_at_point(&self, x: usize, y: usize) -> usize {
         let mut indices = Vec::with_capacity(8);
         for yy in (-1 as i32)..2 {
             for xx in (-1 as i32)..2 {
@@ -173,15 +173,15 @@ impl DoubleBufferGrid {
 
 pub struct App {
     grids: DoubleBufferGrid,
-    grid_width: u32,
-    grid_height: u32,
-    cycle_count: u64,
+    grid_width: usize,
+    grid_height: usize,
+    cycle_count: usize,
     skip_ratio: u16,
 }
 
 impl App {
-    pub fn new(width: u32, height: u32) -> Self {
-        let grids = DoubleBufferGrid::new(width as usize, height as usize);
+    pub fn new(width: usize, height: usize) -> Self {
+        let grids = DoubleBufferGrid::new(width, height);
 
         App {
             grids,
@@ -197,7 +197,7 @@ impl App {
         self
     }
 
-    pub fn get_alive_neighbours_at_point(&self, x: u32, y: u32) -> usize {
+    pub fn get_alive_neighbours_at_point(&self, x: usize, y: usize) -> usize {
         self.grids.get_alive_neighbours_at_point(x, y)
     }
 }
@@ -271,7 +271,7 @@ fn logic_update(app: &mut App, player_state: &PlayerState) -> anyhow::Result<()>
 
     app.cycle_count += 1;
 
-    if app.cycle_count % app.skip_ratio as u64 != 0 {
+    if app.cycle_count % app.skip_ratio as usize != 0 {
         return Ok(());
     }
 
@@ -322,8 +322,8 @@ fn ui<B: Backend>(
             let cell = match &read[index as usize] {
                 // CellState::Alive => Cell::from("██").bg(Color::Black).fg(Color::White),
                 CellState::Alive => Cell::from("  ").bg(Color::White).fg(Color::Black),
-                CellState::Dead => Cell::from(" ").bg(Color::Black).fg(Color::White),
-                // CellState::Dead => Cell::from(" ").bg(Color::Reset).fg(Color::White),
+                // CellState::Dead => Cell::from(" ").bg(Color::Black).fg(Color::White),
+                CellState::Dead => Cell::from(" ").bg(Color::Reset).fg(Color::White),
             };
 
             row.push(cell);
