@@ -366,7 +366,7 @@ fn ui<B: Backend>(
                 CellState::Alive(c) => {
                     let c = std::cmp::min(*c, MAX_LIFE_CYCLES);
                     let dc = c as f64 / MAX_LIFE_CYCLES as f64;
-                    let dc = 1.0 - dc;
+                    // let dc = 1.0 - dc;
                     let col = (dc * 255.0) as u8;
                     let col = Color::Rgb(255 - col, col, col);
 
