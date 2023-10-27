@@ -159,10 +159,9 @@ impl DoubleBufferGrid {
             }
         }
 
-        let read_grid = &self.get_read_grid();
         indices
             .iter()
-            .map(|i| &read_grid[*i])
+            .map(|i| &self.get_read_grid()[*i])
             .filter(|cs| match *cs {
                 CellState::Alive => true,
                 CellState::Dead => false,
@@ -207,16 +206,14 @@ fn main() -> anyhow::Result<()> {
     stdout().execute(EnterAlternateScreen)?;
 
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    let mut should_quit = false;
-
     let size = terminal.size()?;
+    let mut player_state = PlayerState::Pause;
     let app_layout = AppLayout::generate(size);
-
     let mut app = App::new(app_layout.grid_cell_width, app_layout.grid_cell_height);
     app.randomize_cells();
 
-    let mut player_state = PlayerState::Pause;
 
+    let mut should_quit = false;
     while !should_quit {
         should_quit = handle_events(&mut app, &mut player_state)?;
         logic_update(&mut app, &player_state)?;
