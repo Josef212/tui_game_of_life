@@ -1,3 +1,10 @@
+mod player_state;
+mod cell_state;
+mod border_policy;
+mod app_layout;
+mod double_buffer_grid;
+mod app;
+
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -6,242 +13,12 @@ use crossterm::{
 use ratatui::{prelude::*, widgets::*};
 use std::io::stdout;
 
+use player_state::PlayerState;
+use cell_state::CellState;
+use app_layout::AppLayout;
+use app::App;
+
 const MAX_LIFE_CYCLES: usize = 10;
-
-#[derive(Clone, Debug)]
-pub enum CellState {
-    Alive(usize),
-    Dead,
-}
-
-#[derive(Debug)]
-pub enum PlayerState {
-    Play,
-    Pause,
-}
-
-impl PlayerState {
-    pub fn switch(&mut self) {
-        *self = match self {
-            PlayerState::Pause => PlayerState::Play,
-            PlayerState::Play => PlayerState::Pause,
-        };
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum BorderPolicy {
-    Clamp,
-    Wrap,
-}
-
-impl BorderPolicy {
-    pub fn switch(&mut self) {
-        *self = match self {
-            Self::Clamp => Self::Wrap,
-            Self::Wrap => Self::Clamp,
-        };
-    }
-}
-
-pub struct AppLayout {
-    main_layout: Rect,
-    grid_panel: Rect,
-    config_panel: Rect,
-    console_panel: Rect,
-    bottom_panel: Rect,
-    grid_cell_width: usize,
-    grid_cell_height: usize,
-    grid_constraints: Vec<Constraint>,
-}
-
-impl AppLayout {
-    pub fn generate(terminal_rect: Rect) -> Self {
-        let main_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(10), Constraint::Length(3)])
-            .split(terminal_rect.inner(&Margin::new(1, 1)));
-
-        let bottom_panel = main_layout[1];
-
-        let main_layout = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(80), Constraint::Percentage(20)])
-            .split(main_layout[0]);
-
-        let right_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(80), Constraint::Percentage(20)])
-            .split(main_layout[1]);
-
-        let grid_width = Self::get_grid_width(&main_layout[0]);
-        let grid_height = Self::get_grid_height(&main_layout[0]);
-        let constrains = std::iter::repeat(Constraint::Length(2))
-            .take(grid_width as usize)
-            .collect::<Vec<Constraint>>();
-
-        Self {
-            main_layout: terminal_rect,
-            grid_panel: main_layout[0],
-            config_panel: right_layout[0],
-            console_panel: right_layout[1],
-            bottom_panel,
-            grid_cell_width: grid_width,
-            grid_cell_height: grid_height,
-            grid_constraints: constrains,
-        }
-    }
-
-    fn get_grid_width(grid_panel: &Rect) -> usize {
-        ((grid_panel.width - 2) / 2) as usize
-    }
-
-    fn get_grid_height(grid_panel: &Rect) -> usize {
-        (grid_panel.height - 2) as usize
-    }
-}
-
-pub struct DoubleBufferGrid {
-    grids: [Vec<CellState>; 2],
-    cycle: usize,
-    width: usize,
-    height: usize,
-}
-
-impl DoubleBufferGrid {
-    pub fn new(width: usize, height: usize) -> Self {
-        let size = width * height;
-        let grids = [
-            std::iter::repeat(CellState::Dead).take(size).collect(),
-            std::iter::repeat(CellState::Dead).take(size).collect(),
-        ];
-
-        Self {
-            grids,
-            cycle: 0,
-            width,
-            height,
-        }
-    }
-
-    pub fn randomize(&mut self) {
-        let size = self.width * self.height;
-        for i in 0..size {
-            let state = if rand::random() {
-                CellState::Alive(0)
-            } else {
-                CellState::Dead
-            };
-            self.grids[0][i] = state.clone();
-            self.grids[1][i] = state.clone();
-        }
-    }
-
-    pub fn add_cycle(&mut self) {
-        self.cycle += 1;
-    }
-
-    pub fn get_read_grid(&self) -> &Vec<CellState> {
-        let read_grid_index = self.cycle % 2;
-        &self.grids[read_grid_index]
-    }
-
-    pub fn get_write_grid(&mut self) -> &mut Vec<CellState> {
-        let write_grid_index = (self.cycle + 1) % 2;
-        &mut self.grids[write_grid_index]
-    }
-
-    pub fn get_render_grid(&self) -> &Vec<CellState> {
-        let write_grid_index = (self.cycle + 1) % 2;
-        &self.grids[write_grid_index]
-    }
-
-    pub fn get_alive_neighbours_at_point(&self, x: usize, y: usize, policy: BorderPolicy) -> usize {
-        let mut indices = Vec::with_capacity(8);
-        for yy in (-1 as i32)..2 {
-            for xx in (-1 as i32)..2 {
-                if xx == 0 && yy == 0 {
-                    continue;
-                }
-
-                let mut new_x = x as i32 + xx;
-                let mut new_y = y as i32 + yy;
-
-                if policy == BorderPolicy::Clamp {
-                    if new_x < 0
-                        || new_x >= self.width as i32
-                        || new_y < 0
-                        || new_y >= self.height as i32
-                    {
-                        continue;
-                    }
-                } else if policy == BorderPolicy::Wrap {
-                    // Would be great to use modulus but it's not working with negative numbers 🙃
-                    // new_x = new_x % (self.width as i32);
-                    // new_y = new_y % (self.height as i32);
-                    if new_x < 0 {
-                        new_x = (self.width - 1) as i32;
-                    }
-                    if new_x >= self.width as i32 {
-                        new_x = 0;
-                    }
-                    if new_y < 0 {
-                        new_y = (self.height - 1) as i32;
-                    }
-                    if new_y >= self.height as i32 {
-                        new_y = 0;
-                    }
-                }
-
-                let index = (new_y as usize) * self.width + (new_x as usize);
-                indices.push(index);
-            }
-        }
-
-        indices
-            .iter()
-            .map(|i| &self.get_read_grid()[*i])
-            .filter(|cs| match *cs {
-                CellState::Alive(_) => true,
-                CellState::Dead => false,
-            })
-            .count()
-    }
-}
-
-pub struct App {
-    grids: DoubleBufferGrid,
-    grid_width: usize,
-    grid_height: usize,
-    cycle_count: usize,
-    skip_ratio: u16,
-    border_policy: BorderPolicy,
-}
-
-impl App {
-    pub fn new(width: usize, height: usize) -> Self {
-        let grids = DoubleBufferGrid::new(width, height);
-
-        App {
-            grids,
-            grid_width: width,
-            grid_height: height,
-            cycle_count: 0,
-            skip_ratio: 1,
-            border_policy: BorderPolicy::Clamp,
-        }
-    }
-
-    pub fn randomize_cells(&mut self) -> &mut Self {
-        self.grids.randomize();
-        self
-    }
-
-    pub fn get_alive_neighbours_at_point(&self, x: usize, y: usize) -> usize {
-        self.grids
-            .get_alive_neighbours_at_point(x, y, self.border_policy.clone())
-    }
-}
 
 fn main() -> anyhow::Result<()> {
     enable_raw_mode()?;
@@ -251,7 +28,7 @@ fn main() -> anyhow::Result<()> {
     let size = terminal.size()?;
     let mut player_state = PlayerState::Pause;
     let app_layout = AppLayout::generate(size);
-    let mut app = App::new(app_layout.grid_cell_width, app_layout.grid_cell_height);
+    let mut app = App::new(app_layout.width(), app_layout.height());
     app.randomize_cells();
 
     let mut should_quit = false;
