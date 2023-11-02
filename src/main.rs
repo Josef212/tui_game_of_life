@@ -21,8 +21,9 @@ fn main() -> anyhow::Result<()> {
     let backend = CrosstermBackend::new(stdout());
     let terminal = Terminal::new(backend)?;
     let size = terminal.size()?.clone();
-    let events = EventHandler::new(100);
-    let mut tui = Tui::new(terminal, events);
+    let input_events = EventHandler::new_input_event_handler(250);
+    let update_events = EventHandler::new_update_event_handler(50);
+    let mut tui = Tui::new(terminal, input_events);
     tui.init()?;
 
     let mut app = App::new(size);
@@ -30,14 +31,18 @@ fn main() -> anyhow::Result<()> {
 
     while !app.should_quit {
         match tui.events.next()? {
-            app_event::Event::Tick => app.tick(),
             app_event::Event::Key(key_event) => handle_key_events(key_event, &mut app)?,
             app_event::Event::Mouse(_) => {},
             app_event::Event::Resize(_, _) => {},
             app_event::Event::None => {},
+            _ => {},
         }
 
-        // app.logic_update()?;
+        match update_events.next()? {
+            app_event::Event::Tick => app.tick(),
+            _ => {},
+        }
+
         tui.draw(&mut app)?;
     }
 

@@ -32,7 +32,7 @@ pub struct EventHandler {
 
 impl EventHandler {
     /// Constructs a new instance of [`EventHandler`].
-    pub fn new(tick_rate: u64) -> Self {
+    pub fn new_input_event_handler(tick_rate: u64) -> Self {
         let tick_rate = Duration::from_millis(tick_rate);
         let (sender, receiver) = mpsc::channel();
         let handler = {
@@ -54,6 +54,28 @@ impl EventHandler {
                         .expect("failed to send terminal event")
                     }
 
+                    if last_tick.elapsed() >= tick_rate {
+                        last_tick = Instant::now();
+                    }
+                }
+            })
+        };
+
+        Self {
+            sender,
+            receiver,
+            handler,
+        }
+    }
+
+    pub fn new_update_event_handler(tick_rate: u64) -> Self {
+        let tick_rate = Duration::from_millis(tick_rate);
+        let (sender, receiver) = mpsc::channel();
+        let handler = {
+            let sender = sender.clone();
+            thread::spawn(move || {
+                let mut last_tick = Instant::now();
+                loop {
                     if last_tick.elapsed() >= tick_rate {
                         sender.send(Event::Tick).expect("failed to send tick event");
                         last_tick = Instant::now();
