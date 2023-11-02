@@ -22,7 +22,7 @@ fn main() -> anyhow::Result<()> {
     let terminal = Terminal::new(backend)?;
     let size = terminal.size()?.clone();
     let input_events = EventHandler::new_input_event_handler(250);
-    let update_events = EventHandler::new_update_event_handler(50);
+    let update_events = EventHandler::new_update_event_handler(75);
     let mut tui = Tui::new(terminal, input_events);
     tui.init()?;
 
