@@ -15,7 +15,6 @@ use std::io::stdout;
 
 use player_state::PlayerState;
 use cell_state::CellState;
-use app_layout::AppLayout;
 use app::App;
 
 const MAX_LIFE_CYCLES: usize = 10;
@@ -25,17 +24,16 @@ fn main() -> anyhow::Result<()> {
     stdout().execute(EnterAlternateScreen)?;
 
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    let size = terminal.size()?;
-    let mut player_state = PlayerState::Pause;
-    let app_layout = AppLayout::generate(size);
-    let mut app = App::new(app_layout.width(), app_layout.height());
+    let size = terminal.size()?.clone();
+
+    let mut app = App::new(size);
     app.randomize_cells();
 
     let mut should_quit = false;
     while !should_quit {
-        should_quit = handle_events(&mut app, &mut player_state)?;
-        logic_update(&mut app, &player_state)?;
-        terminal.draw(|frame| ui(&app, &app_layout, &player_state, frame))?;
+        should_quit = handle_events(&mut app)?;
+        logic_update(&mut app)?;
+        terminal.draw(|frame| ui(&app, frame))?;
     }
 
     disable_raw_mode()?;
@@ -44,7 +42,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_events(app: &mut App, player_state: &mut PlayerState) -> anyhow::Result<bool> {
+fn handle_events(app: &mut App) -> anyhow::Result<bool> {
     if event::poll(std::time::Duration::from_millis(50))? {
         if let Event::Key(key) = event::read()? {
             if key.kind == event::KeyEventKind::Press {
@@ -55,18 +53,8 @@ fn handle_events(app: &mut App, player_state: &mut PlayerState) -> anyhow::Resul
                         app.cycle_count = 0;
                         false
                     }
-                    KeyCode::Char('k') => {
-                        if app.skip_ratio > 1 {
-                            app.skip_ratio -= 1;
-                        }
-                        false
-                    }
-                    KeyCode::Char('j') => {
-                        app.skip_ratio += 1;
-                        false
-                    }
                     KeyCode::Char('p') => {
-                        player_state.switch();
+                        app.player_state.switch();
                         false
                     }
                     KeyCode::Char('b') => {
@@ -82,18 +70,13 @@ fn handle_events(app: &mut App, player_state: &mut PlayerState) -> anyhow::Resul
     Ok(false)
 }
 
-fn logic_update(app: &mut App, player_state: &PlayerState) -> anyhow::Result<()> {
-    match player_state {
+fn logic_update(app: &mut App) -> anyhow::Result<()> {
+    match app.player_state {
         PlayerState::Play => {}
         PlayerState::Pause => return Ok(()),
     };
 
     app.cycle_count += 1;
-
-    if app.cycle_count % app.skip_ratio as usize != 0 {
-        return Ok(());
-    }
-
     app.grids.add_cycle();
 
     for y in 0..app.grid_height {
@@ -127,8 +110,6 @@ fn logic_update(app: &mut App, player_state: &PlayerState) -> anyhow::Result<()>
 
 fn ui<B: Backend>(
     app: &App,
-    app_layout: &AppLayout,
-    player_state: &PlayerState,
     frame: &mut Frame<B>,
 ) {
     let mut cells = Vec::with_capacity((app.grid_width * app.grid_height) as usize);
@@ -166,14 +147,14 @@ fn ui<B: Backend>(
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded);
 
-    frame.render_widget(block, app_layout.main_layout);
+    frame.render_widget(block, app.layout.main_layout);
 
     let table = Table::new(cells)
         .block(Block::default().borders(Borders::ALL))
-        .widths(&app_layout.grid_constraints)
+        .widths(&app.layout.grid_constraints)
         .column_spacing(0);
 
-    frame.render_widget(table, app_layout.grid_panel);
+    frame.render_widget(table, app.layout.grid_panel);
 
     let block = Block::new()
         .title("Config")
@@ -187,8 +168,12 @@ fn ui<B: Backend>(
             Span::raw(app.cycle_count.to_string()),
         ]),
         Line::from(vec![
+            Span::raw("Grid size: "),
+            Span::raw(format!("{}x{}", app.layout.width(), app.layout.height())),
+        ]),
+        Line::from(vec![
             Span::raw("Player state: "),
-            Span::raw(format!("{:?}", player_state)),
+            Span::raw(format!("{:?}", app.player_state)),
         ]),
         Line::from(vec![
             Span::raw("Border policy: "),
@@ -197,14 +182,14 @@ fn ui<B: Backend>(
     ]);
     let text = Paragraph::new(text).block(block);
 
-    frame.render_widget(text, app_layout.config_panel);
+    frame.render_widget(text, app.layout.config_panel);
 
     let block = Block::new()
         .title("Console")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded);
 
-    frame.render_widget(block, app_layout.console_panel);
+    frame.render_widget(block, app.layout.console_panel);
 
     let block = Block::new()
         .title("Cheatsheat")
@@ -213,5 +198,5 @@ fn ui<B: Backend>(
 
     let shortcuts = Text::from("Q: quit  R: reset  P: play/pause  B: switch border policy");
     let shortcuts = Paragraph::new(shortcuts).block(block);
-    frame.render_widget(shortcuts, app_layout.bottom_panel);
+    frame.render_widget(shortcuts, app.layout.bottom_panel);
 }

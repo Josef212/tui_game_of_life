@@ -1,16 +1,23 @@
-use crate::{double_buffer_grid::DoubleBufferGrid, border_policy::BorderPolicy};
+use ratatui::prelude::Rect;
+
+use crate::{double_buffer_grid::DoubleBufferGrid, border_policy::BorderPolicy, app_layout::AppLayout, player_state::PlayerState};
 
 pub struct App {
     pub grids: DoubleBufferGrid,
     pub grid_width: usize,
     pub grid_height: usize,
     pub cycle_count: usize,
-    pub skip_ratio: u16,
     pub border_policy: BorderPolicy,
+    pub layout: AppLayout,
+    pub player_state: PlayerState,
 }
 
 impl App {
-    pub fn new(width: usize, height: usize) -> Self {
+    pub fn new(terminal_rect: Rect) -> Self {
+        let width = terminal_rect.width as usize;
+        let height = terminal_rect.height as usize;
+
+        let layout = AppLayout::generate(terminal_rect);
         let grids = DoubleBufferGrid::new(width, height);
 
         App {
@@ -18,8 +25,9 @@ impl App {
             grid_width: width,
             grid_height: height,
             cycle_count: 0,
-            skip_ratio: 1,
             border_policy: BorderPolicy::Clamp,
+            layout,
+            player_state: PlayerState::Pause,
         }
     }
 
